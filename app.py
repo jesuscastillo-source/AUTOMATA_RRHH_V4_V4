@@ -371,7 +371,7 @@ def convertir_docs_a_pdf_batch(archivos_docx: dict) -> tuple:
             if n_paginas and n_paginas > 1 and corta:
                 pendientes[nombre] = archivos_docx[nombre]
 
-        for factor in (0.97, 0.93, 0.88, 0.82, 0.75, 0.68):
+        for factor in (0.97, 0.94, 0.91, 0.88, 0.85, 0.82, 0.78, 0.74, 0.70, 0.65, 0.60, 0.52, 0.45):
             if not pendientes:
                 break
             docx_ajustados = {n: _preparar_docx_para_pdf(b, factor=factor) for n, b in pendientes.items()}
