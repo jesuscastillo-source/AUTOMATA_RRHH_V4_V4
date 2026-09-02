@@ -306,6 +306,35 @@ def _pdf_paginas_y_ultima_corta(pdf_bytes, umbral_caracteres=150):
         return None, False
 
 
+def _contar_imagenes_pdf(pdf_bytes):
+    """Cuenta cuántas imágenes DISTINTAS (por contenido, no por cuántas veces
+    se repiten) trae un PDF — logos, sellos, firmas escaneadas. Se usa como
+    red de seguridad: si un ajuste de interlineado más agresivo 'mejora' la
+    cantidad de páginas pero de paso hace que LibreOffice pierda alguna
+    imagen en el camino, NO debe aceptarse ese resultado aunque técnicamente
+    haya bajado de página — perder un sello es peor que una página de más.
+
+    Importante: cuenta imágenes ÚNICAS (por hash de contenido), no instancias
+    por página — si no, un logo de encabezado que se repite en cada página
+    haría parecer que bajar de 2 a 1 página 'perdió' imágenes cuando en
+    realidad solo dejó de repetirse una vez menos. Devuelve None si no se
+    pudo contar (por seguridad, en ese caso no se bloquea el resultado)."""
+    try:
+        from pypdf import PdfReader
+        import hashlib
+        r = PdfReader(io.BytesIO(pdf_bytes))
+        vistas = set()
+        for p in r.pages:
+            for img in p.images:
+                try:
+                    vistas.add(hashlib.md5(img.data).hexdigest())
+                except Exception:
+                    continue
+        return len(vistas)
+    except Exception:
+        return None
+
+
 def _convertir_lote_soffice(docx_por_nombre: dict, tmpdir_base=None) -> dict:
     """Convierte un lote {nombre: bytes_docx} a PDF en UNA sola invocación de
     LibreOffice. Devuelve {nombre: bytes_pdf} (solo los que sí se generaron)."""
@@ -366,8 +395,10 @@ def convertir_docs_a_pdf_batch(archivos_docx: dict) -> tuple:
             return {}, "LibreOffice no generó ningún PDF."
 
         pendientes = {}
+        imagenes_base = {}
         for nombre, pdf_bytes in pdfs.items():
             n_paginas, corta = _pdf_paginas_y_ultima_corta(pdf_bytes)
+            imagenes_base[nombre] = _contar_imagenes_pdf(pdf_bytes)
             if n_paginas and n_paginas > 1 and corta:
                 pendientes[nombre] = archivos_docx[nombre]
 
@@ -382,6 +413,16 @@ def convertir_docs_a_pdf_batch(archivos_docx: dict) -> tuple:
                 if pdf_nuevo is None:
                     siguen_pendientes[nombre] = docx_bytes
                     continue
+
+                # Red de seguridad: si este ajuste perdió alguna imagen (ej. el
+                # sello) en el camino, se descarta sin importar si "mejoró" la
+                # cantidad de páginas — perder contenido es peor que 1 página extra.
+                imgs_base = imagenes_base.get(nombre)
+                imgs_nuevo = _contar_imagenes_pdf(pdf_nuevo)
+                if imgs_base is not None and imgs_nuevo is not None and imgs_nuevo < imgs_base:
+                    siguen_pendientes[nombre] = docx_bytes
+                    continue
+
                 n_original, _ = _pdf_paginas_y_ultima_corta(pdfs[nombre])
                 n_nuevo, corta_nuevo = _pdf_paginas_y_ultima_corta(pdf_nuevo)
                 if n_nuevo and n_original and n_nuevo < n_original:
