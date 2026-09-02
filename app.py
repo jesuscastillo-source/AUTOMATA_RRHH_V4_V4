@@ -333,13 +333,16 @@ def _convertir_lote_soffice(docx_por_nombre: dict, tmpdir_base=None) -> dict:
 
 def convertir_docs_a_pdf_batch(archivos_docx: dict) -> tuple:
     """archivos_docx: {nombre_sin_extension: bytes_docx}.
-    Convierte todo el lote SIN tocar el interlineado (rápido, un solo llamado a
-    LibreOffice). A los que resulten con una última página casi vacía (indicio
-    de que 1-2 líneas se desbordaron por diferencias de fuente del servidor,
-    no porque el documento de verdad tenga más páginas), los reintenta aparte
-    con el interlineado un poco más ajustado, probando primero el cambio más
-    sutil posible — así la gran mayoría de documentos ni se tocan, y solo los
-    que de verdad lo necesitan se ajustan lo mínimo indispensable.
+    Convierte todo el lote SIN ajustar el interlineado (rápido, un solo llamado
+    a LibreOffice) pero SIEMPRE desvinculando los campos de combinación de Word
+    (para que el negrita se mantenga en el PDF, sin importar si el documento
+    necesita además el ajuste de página). A los que resulten con una última
+    página casi vacía (indicio de que 1-2 líneas se desbordaron por diferencias
+    de fuente del servidor, no porque el documento de verdad tenga más
+    páginas), los reintenta aparte con el interlineado un poco más ajustado,
+    probando primero el cambio más sutil posible — así la gran mayoría de
+    documentos no se comprimen nada, y solo los que de verdad lo necesitan se
+    ajustan lo mínimo indispensable.
 
     Devuelve (pdfs, error):
     - pdfs: {nombre_sin_extension: bytes_pdf} de los que sí se pudieron convertir
@@ -352,7 +355,13 @@ def convertir_docs_a_pdf_batch(archivos_docx: dict) -> tuple:
         return {}, "LibreOffice no está instalado en este servidor (falta packages.txt con libreoffice-writer)."
 
     try:
-        pdfs = _convertir_lote_soffice(archivos_docx)
+        # SIEMPRE se desvinculan los campos de combinación (para el negrita del
+        # PDF), incluso en el primer intento "natural" sin ajuste de interlineado
+        # — antes esto solo pasaba si el documento además necesitaba el ajuste
+        # de página, dejando sin negrita a cualquier documento que ya cupiera
+        # bien en una página.
+        archivos_base = {n: _preparar_docx_para_pdf(b, factor=None) for n, b in archivos_docx.items()}
+        pdfs = _convertir_lote_soffice(archivos_base)
         if not pdfs:
             return {}, "LibreOffice no generó ningún PDF."
 
@@ -362,7 +371,7 @@ def convertir_docs_a_pdf_batch(archivos_docx: dict) -> tuple:
             if n_paginas and n_paginas > 1 and corta:
                 pendientes[nombre] = archivos_docx[nombre]
 
-        for factor in (0.97, 0.93, 0.88, 0.82):
+        for factor in (0.97, 0.93, 0.88, 0.82, 0.75, 0.68):
             if not pendientes:
                 break
             docx_ajustados = {n: _preparar_docx_para_pdf(b, factor=factor) for n, b in pendientes.items()}
