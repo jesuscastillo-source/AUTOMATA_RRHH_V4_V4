@@ -1167,11 +1167,12 @@ with st.sidebar:
         st.session_state.chat_ayuda.append(("assistant", respuesta_ayuda))
         st.rerun()
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📑 Contratos",
     "🧮 Cálculo + Finiquito + Jurada",
     "➕ Anexo Continuidad",
     "⬆️ Anexo Obrero→Capataz",
+    "📍 Anexo Cambio Unidad",
     "🧩 Generador Universal",
 ])
 
@@ -1683,9 +1684,89 @@ with tab4:
 
 
 # ---------------------------------------------------------
-# TAB 5: GENERADOR UNIVERSAL (columnas 100% dinámicas)
+# TAB 5: ANEXO CAMBIO UNIDAD LABORAL
 # ---------------------------------------------------------
 with tab5:
+    st.subheader("Anexo Cambio de Unidad Laboral")
+    with st.expander("Columnas esperadas en el Excel"):
+        st.markdown(
+            "- `NOMBRE COMPLETO`, `CARNÉ DE IDENTIDAD N°`\n"
+            "- `UNIDAD` (la unidad actual), `UNIDAD NUEVA` (la unidad a la que se cambia)\n"
+            "- `COMUNA`, `PROVINCIA` (de la unidad nueva)\n"
+            "- `FECHA ACTUAL`, `FECHA INICIO CONTRATO`, `FECHA UNIDAD NUEVA DESDE` (fechas)"
+        )
+
+    c1, c2 = st.columns(2)
+    excel_u = c1.file_uploader("Excel de datos", type=["xlsx"], key="u2_excel")
+    molde_u = c2.file_uploader("Plantilla Word (anexo cambio de unidad)", type=["docx"], key="u2_molde")
+    bloque_auditoria_ia(excel_u, "Datos para anexos de cambio de unidad laboral", "anexo_unidad")
+    generar_pdf_u2 = st.checkbox("📄 También generar en PDF (mismo formato del Word)", value=True, key="pdf_u2")
+
+    if st.button("Generar anexos", key="btn_u2"):
+        if not excel_u or not molde_u:
+            st.error("Sube el Excel y la plantilla primero.")
+            st.session_state.pop("resultado_u2", None)
+        else:
+            try:
+                date_headers = ["FECHA ACTUAL", "FECHA INICIO CONTRATO", "FECHA UNIDAD NUEVA DESDE"]
+                excel_data = leer_excel_simple(excel_u.getvalue(), date_headers)
+
+                if not excel_data:
+                    st.warning("No se encontraron filas válidas.")
+                    st.session_state.pop("resultado_u2", None)
+                else:
+                    archivos = {}
+                    errores_filas = []
+                    molde_bytes = molde_u.getvalue()
+                    for idx, row_data in enumerate(excel_data, start=1):
+                        try:
+                            doc = Document(io.BytesIO(molde_bytes))
+                            replace_mergefields_simple(doc, row_data)
+                            nombre = row_data["NOMBRE COMPLETO"].replace(" ", "_")
+                            archivos[f"{idx:02d}_{nombre}_CAMBIO_UNIDAD.docx"] = guardar_docx_bytes(doc)
+                        except Exception as e:
+                            errores_filas.append(f"Fila {idx} ({row_data.get('NOMBRE COMPLETO', '?')}): {e}")
+
+                    n_generados = len(archivos)
+                    if archivos and generar_pdf_u2:
+                        with st.spinner("Convirtiendo a PDF..."):
+                            archivos.update(agregar_pdfs_al_zip(archivos))
+
+                    archivos_word, archivos_pdf = separar_word_y_pdf(archivos)
+                    st.session_state["resultado_u2"] = {
+                        "n_generados": n_generados,
+                        "total": len(excel_data),
+                        "zip_word": crear_zip(archivos_word) if archivos_word else None,
+                        "zip_pdf": crear_zip(archivos_pdf) if archivos_pdf else None,
+                        "errores_filas": errores_filas,
+                    }
+            except Exception as e:
+                st.error(f"Error generando los anexos: {e}")
+                st.session_state.pop("resultado_u2", None)
+
+    if "resultado_u2" in st.session_state:
+        r = st.session_state["resultado_u2"]
+        if r["zip_word"]:
+            st.success(f"{r['n_generados']} de {r['total']} anexo(s) generado(s).")
+            col_w, col_p = st.columns(2)
+            col_w.download_button(
+                "⬇️ Descargar en Word", r["zip_word"], "Anexos_Cambio_Unidad_Word.zip", "application/zip", key="dl_word_u2",
+            )
+            if r["zip_pdf"]:
+                col_p.download_button(
+                    "⬇️ Descargar en PDF", r["zip_pdf"], "Anexos_Cambio_Unidad_PDF.zip", "application/zip", key="dl_pdf_u2",
+                )
+        if r["errores_filas"]:
+            st.error(
+                "❌ Estas filas no se pudieron procesar — corrígelas y vuelve a intentar:\n\n"
+                + "\n".join(f"- {e}" for e in r["errores_filas"])
+            )
+
+
+# ---------------------------------------------------------
+# TAB 6: GENERADOR UNIVERSAL (columnas 100% dinámicas)
+# ---------------------------------------------------------
+with tab6:
     st.subheader("Generador Universal")
     st.caption(
         "Para cualquier documento que no encaje en las pestañas anteriores: sube tu Excel y tu "
